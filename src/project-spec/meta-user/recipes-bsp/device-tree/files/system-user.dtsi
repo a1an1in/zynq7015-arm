@@ -49,4 +49,20 @@
 			dma-names = "s2mm_channel";
 		};
 	};
+
+	/* ===== MIO key→LED 中断 demo (配套 recipes-modules/mio-irq) =====
+	 * 按开发板手册 + 底板原理图 P16_LED&KEY 页:
+	 *   LED = gpio0 第 51 号脚 (PS_MIO51, 底板那 1 路 PS 端 LED, Q13 MOSFET 驱动)
+	 *         → "led"   → devm_gpiod_get(dev,"led",GPIOD_OUT_LOW)
+	 *   KEY = gpio0 第 50 号脚 (PS_MIO50, 底板 KEY2, MIO 那路按键, 20K 上拉)
+	 *         → "key"   → devm_gpiod_get(dev,"key",GPIOD_IN) → gpiod_to_irq → request_irq
+	 * 按键 KEY2 按下拉到低 → 下降沿中断(IRQF_TRIGGER_FALLING), 翻转 MIO51 LED。
+	 * 其余按键: KEY1=复位(PS_SRST_B), KEY3/KEY4=PL(B13_L25/B13_L0, 走 EMIO)。
+	 * 说明: 若实测 LED 低电平点亮, 把 second cell 的 0 改成 1 (GPIO_ACTIVE_LOW)。
+	 */
+	mio-irq {
+		compatible = "xlnx,mio-irq";
+		led-gpios = <&gpio0 51 0>;   /* "led": PS_MIO51 输出, 默认按 active-high */
+		key-gpios = <&gpio0 50 0>;   /* "key": PS_MIO50 (底板 KEY2) 输入, 下降沿   */
+	};
 };
