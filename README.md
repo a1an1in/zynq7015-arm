@@ -21,10 +21,10 @@ petalinux-zynq7020/
 │   └── sstate/arm/           #   ← 32 位 sstate 缓存
 ├── src/              # petalinux 工程(arm,容器内 /work/src)
 └── utils/
-    ├── build-image.sh        # 构建 docker 镜像
-    ├── install-sdk.sh        # 用 auto-install.sh 装 SDK 到 sdk/卷
-    ├── unpack-offline.sh     # 解压 downloads/sstate 离线包
-    └── devops.sh                # 进入容器做工程开发(日常入口)
+    ├── devops.py             # 跨平台统一入口(Linux/macOS/Windows)
+    │                         #   build-image / install-sdk / unpack-offline / <命令...>
+    ├── flash-sd.py           # SD 卡烧写(Linux/WSL 专用)
+    └── wsl-disk.sh           # WSL 磁盘体检(Linux/WSL 专用)
 ```
 
 `docker/patches/` 预留放需要的补丁(当前版本未用)。
@@ -42,12 +42,24 @@ petalinux-zynq7020/
 完整的环境搭建与编译步骤都在 [`doc/环境与编译.md`](doc/环境与编译.md),这里只给速览:
 
 ```bash
-./utils/build-image.sh      # 1. 构建 Docker 镜像(一次性,只装 OS+依赖)
-./utils/install-sdk.sh      # 2. 安装 PetaLinux SDK 到 sdk/(前置:已下载安装器与离线包)
-./utils/unpack-offline.sh   # 3. 解压 downloads/sstate 离线包(可选但推荐,离线编译用)
-./utils/devops.sh              # 4. 进容器 → source settings.sh → cd src → petalinux-build
+# Linux / macOS（Windows 也建议在 WSL2 里这样用）
+./utils/devops.py build-image      # 1. 构建 Docker 镜像(一次性,只装 OS+依赖)
+./utils/devops.py install-sdk      # 2. 安装 PetaLinux SDK 到 sdk/(前置:已下载安装器与离线包)
+./utils/devops.py unpack-offline   # 3. 解压 downloads/sstate 离线包(可选但推荐,离线编译用)
+./utils/devops.py                  # 4. 进容器 → source settings.sh → cd src → petalinux-build
+
+# Windows 原生（PowerShell/cmd，需 Docker Desktop）
+python utils\devops.py build-image
+python utils\devops.py install-sdk
+python utils\devops.py unpack-offline
+python utils\devops.py
 ```
 
+> 跨平台说明：`devops.py` 会按宿主平台自动生成合适的 `docker` 触发命令——Linux/WSL 用
+> `--network host`，macOS/Windows(需 Docker Desktop) 自动改用默认桥接，Windows 主机 UID/GID
+> 自动回退为 1000。编译本身始终在 Linux 容器内进行，宿主只负责“触发”。注意 Yocto 构建对
+> 大小写敏感、符号链接与文件权限依赖较强，Windows 原生盘（NTFS）共享进 Docker 可能更慢或
+> 更易踩坑，Windows 上仍推荐在 WSL2 里运行本入口。
 > 前置下载 - `petalinux-v2021.1-final-installer.run`、`downloads_2021.1_update1.tar.gz`、
 > `sstate_arm_2021.1.tar.gz`(32 位,Zynq-7000 用这个)。详细参数与坑见
 > [`doc/环境与编译.md`](doc/环境与编译.md)。

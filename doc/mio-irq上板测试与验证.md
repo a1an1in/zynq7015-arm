@@ -42,13 +42,13 @@ MIO50/51 未被子系统外设（DDR/QSPI/ENET0/SDIO0/UART1/SDIO1/USB0）占用�
 
 ### 2.2 拿到 `.ko`（统一入口：petalinux-build）
 
-`.ko` 统一由 `./utils/devops.sh petalinux-build` 编译产生：
+`.ko` 统一由 `./utils/devops.py petalinux-build` 编译产生：
 
 ```bash
 # 进容器执行 petalinux-build：全量构建，产出含 mio_irq.ko
-./utils/devops.sh petalinux-build
+./utils/devops.py petalinux-build
 # 只想先验证模块能否编出（更快，单编该 recipe）：
-./utils/devops.sh petalinux-build -c mio-irq
+./utils/devops.py petalinux-build -c mio-irq
 ```
 
 产物位置（以单编为例）：

@@ -19,7 +19,7 @@ DT 中 dma 节点不应再含 `xlnx,include-sg`，`compatible` 应为 `xlnx,axi-
 | 板卡 / FPGA | Zynq-7020，本次跑 `build/aurora.bit`（simple）|
 | ARM 侧 | PetaLinux 5.10（xilinx-v2021.1）+ 对应 `system.xsa`（simple）重生成 device-tree |
 | 板 IP / 账号 | `10.10.10.110` / `root:root`（dropbear）|
-| 部署工具 | `zynq7020-arm/utils/flash-sd.sh`（`deploy` / `probe`）|
+| 部署工具 | `zynq7020-arm/utils/flash-sd.py`（`deploy` / `probe`）|
 | 校验工具 | 板上 `busybox devmem`（读写 AXI 寄存器 / DDR）|
 | 中断 | S2MM 完成中断 → GIC-61（`xilinx-dma-controller`）|
 
@@ -58,10 +58,10 @@ busybox devmem 0x40000004 32   # 例: 读到 0x01000100 => 版本 1.0.1
    使 DT 不含 SG 属性。
 3. **上板**（SD 卡现状复杂时用远程部署，二选一）：
    ```bash
-   utils/flash-sd.sh deploy -b ./src/images/linux root@10.10.10.110 mmcblk0   # 仅换启动模块
-   # 或整 SD 直接刷：utils/flash-sd.sh flash ./src/images/linux
+   utils/flash-sd.py deploy -b ./src/images/linux root@10.10.10.110 mmcblk0   # 仅换启动模块
+   # 或整 SD 直接刷：utils/flash-sd.py flash ./src/images/linux
    ```
-4. 板入网后确认可达：`bash -lc "bash utils/flash-sd.sh probe root@10.10.10.110"`
+4. 板入网后确认可达：`bash -lc "python3 utils/flash-sd.py probe root@10.10.10.110"`
 
 ---
 
@@ -89,7 +89,7 @@ busybox devmem 0x40000004 32   # 例: 读到 0x01000100 => 版本 1.0.1
 
 跑下面的测试前，先离线确认 DTB 是 SIMPLE （`xlnx,include-sg` 缺失、`compatible=xlnx,axi-dma-7.1`），避免把 SG 的 BIT/DTB 拿来测。
 
-**① 板上运行时（已封装 `utils/flash-sd.sh probe`）**
+**① 板上运行时（已封装 `utils/flash-sd.py probe`）**
 ```bash
 cat  /proc/device-tree/amba_pl/dma@50000000/compatible                    # 应含 xlnx,axi-dma-7.1
 ls   /proc/device-tree/amba_pl/dma@50000000/xlnx,include-sg               # SIMPLE: No such file
@@ -330,7 +330,7 @@ AFTER:   55:  1  0  GIC-0  61 Level  xilinx-dma-controller, xilinx-dma-controlle
 
 **两个经验点（避免再误报 "中断消失"）：**
 1. 中断只有**触发后才计数**：未触发时 61 恒为 0，属正常，不是中断缺失。
-2. `utils/flash-sd.sh probe` 里 `grep -w " 61 "` 会漏抓 `/proc/interrupts` 那行（误显示 "IRQ 61 为空"），是**工具写法问题**，不是没中断；核实请用 `grep -w 61 /proc/interrupts`。
+2. `utils/flash-sd.py probe` 里 `grep -w " 61 "` 会漏抓 `/proc/interrupts` 那行（误显示 "IRQ 61 为空"），是**工具写法问题**，不是没中断；核实请用 `grep -w 61 /proc/interrupts`。
 
 ### 7.3 电平中断粘滞复测（2026-10-05，devmem 直写，待 2026-10-06 续查）
 
@@ -379,5 +379,5 @@ AFTER:   55:  1  0  GIC-0  61 Level  xilinx-dma-controller, xilinx-dma-controlle
 | GIC-61 计数为 0 | 仅写了 `DMACR=0x1`（RS）未置 IOC_IrqEn(bit12)；需 `0x1001` 才触发完成中断 |
 | `DMASR` 读 0 | 相比只 RS 时未开 IOC，或读时序过早；sleep 后重读；完成时 bit0 应=1 |
 | DMA 无握手、源 busy 死等 | 先配 DMA(RS=1) 进入等 `tvalid` 再触发假源，避免源先握手无消费方 |
-| probe 显示 "IRQ 61 为空" 但实测中断正常 | `flash-sd.sh probe` 内用 `grep -w " 61 "` 漏抓 /proc/interrupts 行（工具写法问题）；核实改用 `grep -w 61 /proc/interrupts` |
+| probe 显示 "IRQ 61 为空" 但实测中断正常 | `flash-sd.py probe` 内用 `grep -w " 61 "` 漏抓 /proc/interrupts 行（工具写法问题）；核实改用 `grep -w 61 /proc/interrupts` |
 | 断开后连跑/中途复位，搬运不再完成、无中断、SRC 一直 busy | **旧 bit** 因假源无超时，`busy` 残留(丢 tvalid 同步)而永久卡死 → 需 reboot。**新 bit（假源已加看门狗 + RUN 强覆盖）已自愈**：`busy` 无握手达 `STALL_TIMEOUT` 自动回 idle、下次 RUN 必生效，无需 reboot（须**重新综合上板**才生效）。可靠判据 = DMASR 完成位 + DDR 新帧 + irq 自增**三者齐备**，勿只看 irq |
