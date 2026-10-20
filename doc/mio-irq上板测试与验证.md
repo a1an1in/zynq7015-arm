@@ -1,5 +1,11 @@
 # Zynq mio-irq 上板测试与验证文档
 
+> ⚠️ **新板 MLK-F6P-CZ05（XC7Z015-2CLG485I）上本 demo 已停用**：该板 `MIO51` 是千兆网口 PHY 复位
+> （Vivado PS7 `PCW_ENET0_RESET_IO = MIO 51`），模块 probe 会把该脚拉低/翻转，等于一直按住 PHY 复位，
+> 表现为“系统起来但没有网口”。设备树节点、`CONFIG_mio-irq`、`mio-irq.bb` 均已关闭
+> （见 `configs/rootfs_config` 与 `system-user.dtsi` 里的注释）。下文保留为**旧板 F6-7020** 的测试记录，
+> 换回旧板或在 Vivado 里把 ENET0 reset 从 MIO51 摘掉后可原样复用。
+
 - **目标模块**：`mio-irq`（内核模块，`/work/src/project-spec/meta-user/recipes-modules/mio-irq/`）
 - **功能链路**：PS KEY2（**MIO50**）按键边沿中断 → `request_irq` 的 ISR 每触发一次翻转一次 PS LED（**MIO51**）
 - **驱动实现**：`devm_gpiod_get(led) + devm_gpiod_get(key) + gpiod_to_irq(key) + request_irq`

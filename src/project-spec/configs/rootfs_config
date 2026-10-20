@@ -3985,7 +3985,7 @@ CONFIG_s2mm-user=y
 #
 # modules 
 #
-CONFIG_mio-irq=y
+# CONFIG_mio-irq is not set
 CONFIG_xlnx-s2mm-test=y
 
 #
