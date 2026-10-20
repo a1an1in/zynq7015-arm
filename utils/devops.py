@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""PetaLinux 2021.1 Docker 构建入口（跨平台：Linux / macOS / Windows）。
+"""PetaLinux 2021.1 Docker 构建入口（Linux / WSL）。
 
 把原来分散的 shell 脚本（build-image.sh / install-sdk.sh /
 unpack-offline.sh / devops.sh）合并为一个 Python 入口，编译仍全部在 Docker 里
-执行，宿主只负责拼出「平台相关的 docker 触发命令」。
+执行，宿主只负责拼出 docker 触发命令（--network host + bind mount）。
 
 用法：
     python3 utils/devops.py                        # 交互 shell，/work 为仓库根目录
     python3 utils/devops.py petalinux-build        # 容器内 source settings.sh 后执行命令
     python3 utils/devops.py petalinux-package --boot --u-boot --fpga --force
     python3 utils/devops.py build-image            # 构建 docker 镜像
-    python3 utils/devops.py install-sdk [--interactive]   # 安装 SDK 到 sdk/ 卷
+    python3 utils/devops.py install-sdk [--interactive]   # 安装 SDK 到 sdk/
     python3 utils/devops.py unpack-offline         # 解压 downloads/sstate 离线包
     python3 utils/devops.py help
 
+SDK 放在宿主的 <仓库>/sdk 目录（bind mount 到容器 /opt/xilinx）。
+
 可配环境变量：
     IMG_NAME            默认 petalinux:2021.1
-    HOST_UID/HOST_GID   构建镜像时的宿主 UID/GID（默认自动探测，Windows 默认 1000）
+    HOST_UID/HOST_GID   构建镜像时的宿主 UID/GID（默认自动探测）
     PETALINUX_INSTALLER 显式指定安装器路径
     DOWNLOADS_TGZ/SSTATEGZ  显式指定离线包压缩包路径
     OFFLINE_SRC         容器内 /offline_src 的只读来源目录
     PETALINUX_PROJ      容器内工程目录，默认 /work/src
-    DOCKER_NETWORK      强制指定网络模式（默认：Linux 用 host，macOS/Windows 用默认）
+    DOCKER_NETWORK      强制指定网络模式（默认 --network host）
+    SDK_DIR             SDK 宿主目录覆盖（默认 <仓库>/sdk）
 """
 
 import os
@@ -38,7 +41,7 @@ DOWNLOADS_NAME = "downloads_2021.1_update1.tar.gz"
 SSTATE_NAME = "sstate_arm_2021.1.tar.gz"
 
 HELP = """\
-PetaLinux 2021.1 Docker 构建入口（跨平台 Python，替代原 devops.sh 系列 shell 脚本）
+PetaLinux 2021.1 Docker 构建入口（Linux / WSL）
 
 用法：
   python3 utils/devops.py                       交互 shell（/work 为仓库根目录）
@@ -54,7 +57,7 @@ PetaLinux 2021.1 Docker 构建入口（跨平台 Python，替代原 devops.sh �
   python3 utils/devops.py petalinux-package --boot --u-boot --fpga --force
 
 环境变量：IMG_NAME、HOST_UID、HOST_GID、PETALINUX_INSTALLER、DOWNLOADS_TGZ、
-          SSTATEGZ、OFFLINE_SRC、PETALINUX_PROJ、DOCKER_NETWORK
+          SSTATEGZ、OFFLINE_SRC、PETALINUX_PROJ、DOCKER_NETWORK、SDK_DIR
 """
 
 
@@ -70,18 +73,6 @@ def fail(msg):
 def here():
     """仓库根目录（utils/ 的上一级）。"""
     return Path(__file__).resolve().parent.parent
-
-
-def is_windows():
-    return os.name == "nt"
-
-
-def is_linux():
-    return sys.platform.startswith("linux")
-
-
-def is_macos():
-    return sys.platform == "darwin"
 
 
 def env(name):
@@ -102,23 +93,35 @@ def docker_bin():
 
 
 def network_args():
-    """docker run/build 的网络模式参数。
-
-    - Linux/WSL：默认 --network host（与原 shell 脚本一致，便于访问宿主网络）。
-    - macOS/Windows（Docker Desktop）：不支持 --network host，省略走默认桥接。
-    - 可用 DOCKER_NETWORK 强制覆盖。
-    """
+    """docker run/build 的网络模式参数：默认 --network host，可用 DOCKER_NETWORK 覆盖。"""
     override = env("DOCKER_NETWORK")
     if override:
         return ["--network", override]
-    if is_linux():
-        return ["--network", "host"]
-    return []
+    return ["--network", "host"]
 
 
 def mount_volume(host, container, read_only=False):
     suffix = ":ro" if read_only else ""
     return "{}:{}{}".format(str(host), container, suffix)
+
+
+def sdk_host_dir():
+    """SDK 在宿主的目录；可用 SDK_DIR 覆盖（默认 <仓库>/sdk）。"""
+    v = env("SDK_DIR")
+    return Path(v).expanduser() if v else sdk_dir()
+
+
+def sdk_mount():
+    return mount_volume(sdk_host_dir(), "/opt/xilinx")
+
+
+def sdk_desc():
+    return str(sdk_host_dir())
+
+
+def sdk_ready():
+    """SDK 是否可用：宿主目录里有没有 petalinux/settings.sh。"""
+    return (sdk_host_dir() / "petalinux" / "settings.sh").is_file()
 
 
 def offline_src():
@@ -130,11 +133,8 @@ def offline_src():
     archives = here() / "docker" / "archives"
     if archives.is_dir():
         return archives
-    # /mnt/c 仅存在于 WSL/Linux，macOS/Windows 原生环境跳过该回退。
-    if is_linux():
-        p = Path("/mnt/c/Users/a1an1in/Downloads/baidu")
-        return p if p.is_dir() else None
-    return None
+    p = Path("/mnt/c/Users/a1an1in/Downloads/baidu")
+    return p if p.is_dir() else None
 
 
 def want_tty():
@@ -189,7 +189,7 @@ def container_run_preamble(force_tty=False):
     src = offline_src()
     if src is not None:
         cmd += ["-v", mount_volume(src, "/offline_src", read_only=True)]
-    cmd += ["-v", mount_volume(sdk_dir(), "/opt/xilinx")]
+    cmd += ["-v", sdk_mount()]
     cmd += ["-v", mount_volume(here(), "/work")]
     cmd += ["-w", "/work", "-u", "plsdk", img_name()]
     return cmd
@@ -197,16 +197,62 @@ def container_run_preamble(force_tty=False):
 
 def cmd_shell():
     """无参：进入容器交互 shell。"""
+    if not sdk_ready():
+        log("[warn] {} 里没看到 petalinux/settings.sh，进容器后需要手动 source。"
+            .format(sdk_desc()))
     return container_run_preamble()
 
 
+YOCTO_CMDS = ("petalinux-build", "petalinux-config", "petalinux-package",
+              "petalinux-bsp", "petalinux-kernel", "petalinux-rootfs")
+
+
+def cleanup_stale_containers():
+    """清掉上次构建残留的容器。
+
+    bitbake 的 cooker server 在构建失败时不会退出，容器就一直挂着，并占着
+    bitbake 锁（bitbake.lock 里记的是**容器内**的 PID；下次构建遇到同号 PID
+    会误判"锁被占用"而连不上 server，构建在 silentconfig 阶段就挂掉）。
+    """
+    try:
+        out = subprocess.check_output(
+            [docker_bin(), "ps", "--format", "{{.ID}} {{.Command}}",
+             "--filter", "ancestor={}".format(img_name())],
+            stderr=subprocess.DEVNULL).decode("utf-8", "ignore")
+    except Exception:
+        return
+    for line in out.splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) < 2:
+            continue
+        cid, cmd = parts[0], parts[1]
+        # 只清我们自己的构建容器，别动用户手开的 petalinux 容器
+        if "petalinux/settings.sh" not in cmd:
+            continue
+        log(">> [warn] 清理上次残留的构建容器 {}（bitbake server 没退出）".format(cid))
+        subprocess.call([docker_bin(), "rm", "-f", cid],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 def cmd_run(args):
     """带参：容器内 source settings.sh 并 cd 到工程目录后执行命令。"""
     if not args:
         fail("用法: {} <命令...>".format(sys.argv[0]))
+    if not sdk_ready():
+        fail(
+            "未找到 PetaLinux SDK（{}）。\n"
+            "  sdk 不在 git 里，换机/重新 clone 后必须重做一次：\n"
+            "    1) 下载 petalinux-v2021.1-final-installer.run\n"
+            "    2) 放到 docker/archives/ 下（或设置 PETALINUX_INSTALLER=<路径>）\n"
+            "    3) {} install-sdk\n"
+            .format(sdk_desc(), sys.argv[0]))
+    if any(c in " ".join(args) for c in YOCTO_CMDS):
+        cleanup_stale_containers()
     proj = env("PETALINUX_PROJ") or "/work/src"
     bash_c = ('source /opt/xilinx/petalinux/settings.sh /opt/xilinx/petalinux '
-              '&& cd "$1" && shift && exec "$@"')
+              '&& cd "$1" && shift && '
+              # 上次异常退出留下的锁/socket 会让 bitbake 连不上 server，先清掉
+              'rm -f "{p}/build/bitbake.sock" "{p}/build/bitbake.lock" '
+              '"{p}/build/hashserve.sock" ; '
+              'exec "$@"').format(p=proj)
     return container_run_preamble() + ["bash", "-c", bash_c, "plsdk", proj] + list(args)
 
 
@@ -226,11 +272,10 @@ def find_installer():
     v = env("PETALINUX_INSTALLER")
     if v:
         cands.append(Path(v))
-    cands.append(sdk_dir() / "downloads" / INSTALLER_NAME)
+    cands.append(sdk_host_dir() / "downloads" / INSTALLER_NAME)
     cands.append(here() / "docker" / "archives" / INSTALLER_NAME)
     cands.append(here() / "downloads" / INSTALLER_NAME)
-    if is_linux():
-        cands.append(Path("/mnt/c/Users/a1an1in/Downloads/baidu") / INSTALLER_NAME)
+    cands.append(Path("/mnt/c/Users/a1an1in/Downloads/baidu") / INSTALLER_NAME)
     for c in cands:
         if c.is_file():
             return c
@@ -238,7 +283,7 @@ def find_installer():
 
 
 def dir_size(p):
-    if is_windows() or not shutil.which("du"):
+    if not shutil.which("du"):
         return None
     try:
         out = subprocess.check_output(["du", "-sh", str(p)],
@@ -256,7 +301,7 @@ def cmd_install_sdk(args):
     log(">> 安装器: {}".format(installer))
 
     for sub in ("petalinux", "downloads", "sstate"):
-        (sdk_dir() / sub).mkdir(parents=True, exist_ok=True)
+        (sdk_host_dir() / sub).mkdir(parents=True, exist_ok=True)
     (here() / "src").mkdir(parents=True, exist_ok=True)
 
     inst_dir = installer.parent
@@ -269,17 +314,17 @@ def cmd_install_sdk(args):
             + install_target)
         cmd = ([docker_bin(), "run", "--rm", "-it"] + network_args() +
                ["-v", mount_volume(inst_dir, "/installer", read_only=True),
-                "-v", mount_volume(sdk_dir(), "/opt/xilinx"),
+                sdk_mount(),
                 "-u", "plsdk", "--workdir", "/tmp", img_name(),
                 "/installer/" + inst_name, "--dir", install_target])
         return run(cmd)
 
-    log(">> SDK 安装中（自动应答许可，实时打印进度心跳）... SDK 将写入宿主: "
-        + str(sdk_dir() / "petalinux"))
+    log(">> SDK 安装中（自动应答许可，实时打印进度心跳）... SDK 将写入: "
+        + sdk_desc())
     cmd = ([docker_bin(), "run", "--rm", "-t"] + network_args() +
            docker_env_args("SAP_EXP_TTY", "SAP_EXP_LOG") +
            ["-v", mount_volume(inst_dir, "/installer", read_only=True),
-            "-v", mount_volume(sdk_dir(), "/opt/xilinx"),
+            "-v", sdk_mount(),
             "-v", mount_volume(here() / "docker" / "scripts", "/scripts",
                                 read_only=True),
             "-u", "plsdk", "--workdir", "/tmp", img_name(),
@@ -289,28 +334,23 @@ def cmd_install_sdk(args):
     if rc != 0:
         return rc
 
-    settings = sdk_dir() / "petalinux" / "settings.sh"
-    if not settings.is_file() or settings.stat().st_size == 0:
-        fail("!! 未发现 {}，安装可能未完成。用 SAP_EXP_TTY=1 重跑可看安装器原始输出。"
-             .format(settings))
+    if not sdk_ready():
+        fail("!! 安装后在 {} 里仍未发现 petalinux/settings.sh，安装可能未完成。"
+             "用 SAP_EXP_TTY=1 重跑可看安装器原始输出。".format(sdk_desc()))
 
     log(">> SDK 安装完成:")
-    log("    已生成: {}".format(settings))
-    size = dir_size(sdk_dir() / "petalinux")
+    log("    位置: {}".format(sdk_desc()))
+    size = dir_size(sdk_host_dir() / "petalinux")
     if size:
         log("    大小:   {}".format(size))
     log(">> 下一步: {} unpack-offline 解压离线包，然后 {} 进入工程开发"
         .format(sys.argv[0], sys.argv[0]))
     return 0
-
-
 def archives_dir():
     cands = []
-    if is_linux():
-        cands.append(Path("/mnt/c/Users/a1an1in/softs/xlinx"))
+    cands.append(Path("/mnt/c/Users/a1an1in/softs/xlinx"))
     cands.append(here() / "docker" / "archives")
-    if is_linux():
-        cands.append(Path("/mnt/c/Users/a1an1in/Downloads/baidu"))
+    cands.append(Path("/mnt/c/Users/a1an1in/Downloads/baidu"))
     for c in cands:
         if c.is_dir():
             return c
@@ -323,7 +363,7 @@ def extract_targz(tgz, dest, strip=None):
     dest.mkdir(parents=True, exist_ok=True)
     if not tgz.is_file():
         fail("缺少压缩包: {}".format(tgz))
-    if not is_windows() and shutil.which("tar"):
+    if shutil.which("tar"):
         cmd = ["tar", "-xzf", str(tgz), "-C", str(dest)]
         if strip is not None:
             cmd += ["--strip-components", str(strip)]
@@ -353,10 +393,10 @@ def _extract_targz_python(tgz, dest, strip):
 def cmd_unpack_offline():
     arch = archives_dir()
     downloads_tgz = Path(env("DOWNLOADS_TGZ") or str(arch / DOWNLOADS_NAME))
-    sstate_tgz = Path(env("SSTATEGZ") or str(arch / STATE_NAME))
+    sstate_tgz = Path(env("SSTATEGZ") or str(arch / SSTATE_NAME))
 
-    downloads_dst = sdk_dir() / "downloads"
-    sstate_dst = sdk_dir() / "sstate"
+    downloads_dst = sdk_host_dir() / "downloads"
+    sstate_dst = sdk_host_dir() / "sstate"
 
     log("==> 解压 downloads ...")
     log("    源: {}".format(downloads_tgz))
@@ -364,9 +404,9 @@ def cmd_unpack_offline():
 
     log("==> 解压 sstate ...")
     log("    源: {}".format(sstate_tgz))
-    extract_targz(sstate_tgz, sdk_dir(), strip=None)
+    extract_targz(sstate_tgz, sdk_host_dir(), strip=None)
 
-    sstate_top = sdk_dir() / "sstate_arm_2021.1"
+    sstate_top = sdk_host_dir() / "sstate_arm_2021.1"
     if (sstate_top / "arm").is_dir():
         sstate_dst.mkdir(parents=True, exist_ok=True)
         target = sstate_dst / "arm"

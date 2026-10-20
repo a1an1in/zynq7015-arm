@@ -1,11 +1,13 @@
 # petalinux-zynq7020
 
-基于 **Docker** 的 PetaLinux **2021.1** 构建环境,面向 **Zynq-7020**(XC7Z020, 32 位 ARM Cortex-A9)。
+基于 **Docker** 的 PetaLinux **2021.1** 构建环境,面向 **Zynq-7000**(32 位 ARM Cortex-A9)。
+当前目标板为 **米联客 MLK-F6P-CZ05(XC7Z015-2CLG485I)**;原 F6-7020(XC7Z020)工程与本工程
+同属 zynq 模板,流程完全一致。
 
 ## 为什么用 Docker
 
 - 编译环境可移植、可切换 —— 换机/换环境只需一个镜像 + 一份 SDK 卷。
-- 目标板固定为 Zynq-7020(32 位),离线包用 `sstate_arm_2021.1.tar.gz`(不是 aarch64)。
+- 目标板固定为 Zynq-7000(32 位),离线包用 `sstate_arm_2021.1.tar.gz`(不是 aarch64)。
 
 ## 目录结构
 
@@ -21,7 +23,7 @@ petalinux-zynq7020/
 │   └── sstate/arm/           #   ← 32 位 sstate 缓存
 ├── src/              # petalinux 工程(arm,容器内 /work/src)
 └── utils/
-    ├── devops.py             # 跨平台统一入口(Linux/macOS/Windows)
+    ├── devops.py             # 统一入口(Linux/WSL)
     │                         #   build-image / install-sdk / unpack-offline / <命令...>
     ├── flash-sd.py           # SD 卡烧写(Linux/WSL 专用)
     └── wsl-disk.sh           # WSL 磁盘体检(Linux/WSL 专用)
@@ -42,32 +44,17 @@ petalinux-zynq7020/
 完整的环境搭建与编译步骤都在 [`doc/环境与编译.md`](doc/环境与编译.md),这里只给速览:
 
 ```bash
-# Linux / macOS（Windows 也建议在 WSL2 里这样用）
+# Linux / WSL
 ./utils/devops.py build-image      # 1. 构建 Docker 镜像(一次性,只装 OS+依赖)
 ./utils/devops.py install-sdk      # 2. 安装 PetaLinux SDK 到 sdk/(前置:已下载安装器与离线包)
 ./utils/devops.py unpack-offline   # 3. 解压 downloads/sstate 离线包(可选但推荐,离线编译用)
 ./utils/devops.py                  # 4. 进容器 → source settings.sh → cd src → petalinux-build
-
-# Windows 原生（PowerShell/cmd，需 Docker Desktop）
-python utils\devops.py build-image
-python utils\devops.py install-sdk
-python utils\devops.py unpack-offline
-python utils\devops.py
 ```
-
-> 跨平台说明：`devops.py` 会按宿主平台自动生成合适的 `docker` 触发命令——Linux/WSL 用
-> `--network host`，macOS/Windows(需 Docker Desktop) 自动改用默认桥接，Windows 主机 UID/GID
-> 自动回退为 1000。编译本身始终在 Linux 容器内进行，宿主只负责“触发”。注意 Yocto 构建对
-> 大小写敏感、符号链接与文件权限依赖较强，Windows 原生盘（NTFS）共享进 Docker 可能更慢或
-> 更易踩坑，Windows 上仍推荐在 WSL2 里运行本入口。
-> 前置下载 - `petalinux-v2021.1-final-installer.run`、`downloads_2021.1_update1.tar.gz`、
-> `sstate_arm_2021.1.tar.gz`(32 位,Zynq-7000 用这个)。详细参数与坑见
-> [`doc/环境与编译.md`](doc/环境与编译.md)。
 
 ## 体积与换机
 
-- SDK 卷 `sdk/` 是唯一需要持久保留的东西;换机时把它整体拷走 + 重建镜像即可。
-- petalinux 工程放在仓库根目录 `src/`(容器内 `/work/src`),不进 sdk 卷,方便随代码一起管理。
+- SDK（`sdk/` 目录）是唯一需要持久保留的东西;换机时整体拷走 + 重建镜像即可。
+- petalinux 工程放在仓库根目录 `src/`(容器内 `/work/src`),不进 SDK,方便随代码一起管理。
 - 离线包比较大,已解压后原 `.tar.gz` 可删除以省空间(见米联客手册第 5.2 节)。
 
 ## 说明与坑
@@ -75,3 +62,19 @@ python utils\devops.py
 - 基镜像用 Ubuntu 18.04(PetaLinux 2021.1 官方支持),20.04 缺 `libncurses5/libtinfo5`,易踩坑。
 - Zynq-7000 是 32 位:模板用 `--template zynq`,sstate 用 `arm`,不是 zynqMP/aarch64。
 - PetaLinux 安装器**拒绝 root 运行**,镜像内以 `plsdk` 用户(与宿主 UID/GID 对齐)执行。
+- `sdk/` 不在 git 里:换机 / 重新 clone 后如果直接 `petalinux-build`,会缺 `settings.sh`。
+  `devops.py` 现在会在启动容器前就拦下并提示先跑 `install-sdk`。
+
+- **petalinux 的 silentconfig 失败会删工程配置**：失败时 `src/project-spec/configs/config`
+  会被删掉（它要重写这个文件，重写失败就留在"删了"的状态）。真删了用
+  `git checkout -- src/project-spec/configs/config` 恢复。
+- **构建失败会留下"僵尸容器"**：bitbake 的 cooker server 失败时不退出，容器一直挂着并占着
+  bitbake 锁（`bitbake.lock` 里记的是**容器内** PID，下次构建遇到同号 PID 会误判"锁被占用"，
+  于是报 `Unable to connect to bitbake server` / `Failed to create workspace directory`）。
+  `devops.py` 现在每次构建前自动清掉自己残留的构建容器，并删掉 build 目录里残留的
+  `bitbake.sock` / `bitbake.lock` / `hashserve.sock`。手工排查：
+  `docker ps --filter ancestor=petalinux:2021.1`。
+- **空 TMPDIR 的第一次构建会报一条 `quilt-native` 签名错**：
+  `ERROR: quilt-native-0.66-r0 do_rm_work: Taskhash mismatch` —— Xilinx 的 sstate 签名锁
+  （`build/conf/locked-sigs.inc`）与本机重算的签名对不上，**只影响构建期工具、不影响产物**；
+  第二次（增量）构建就干净了。
