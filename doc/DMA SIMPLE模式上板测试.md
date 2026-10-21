@@ -1,4 +1,4 @@
-# Zynq-7020 AXI DMA — SIMPLE 模式上板测试文档
+# Zynq-7015 AXI DMA — SIMPLE 模式上板测试文档
 
 - **目标 IP**：Xilinx AXI DMA（`axi_dma_0`），**SIMPLE 模式**（`c_include_sg=0`，非 SG）
 - **数据通路**：PL 假数据源 `aurora_dma_src`（AXI4-Stream 帧发生器）→ `S_AXIS_S2MM`
@@ -16,10 +16,10 @@ DT 中 dma 节点不应再含 `xlnx,include-sg`，`compatible` 应为 `xlnx,axi-
 
 | 项 | 值 |
 |----|----|
-| 板卡 / FPGA | Zynq-7020，本次跑 `build/aurora.bit`（simple）|
+| 板卡 / FPGA | Zynq-7015，本次跑 `build/aurora.bit`（simple）|
 | ARM 侧 | PetaLinux 5.10（xilinx-v2021.1）+ 对应 `system.xsa`（simple）重生成 device-tree |
 | 板 IP / 账号 | `10.10.10.110` / `root:root`（dropbear）|
-| 部署工具 | `zynq7020-arm/utils/flash-sd.py`（`deploy` / `probe`）|
+| 部署工具 | `zynq7015-arm/utils/flash-sd.py`（`deploy` / `probe`）|
 | 校验工具 | 板上 `busybox devmem`（读写 AXI 寄存器 / DDR）|
 | 中断 | S2MM 完成中断 → GIC-61（`xilinx-dma-controller`）|
 

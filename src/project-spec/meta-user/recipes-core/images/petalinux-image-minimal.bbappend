@@ -7,8 +7,9 @@
 #       如果继续在用户态 export gpio957 并 output 0，就会把 PHY 一直按在复位里，
 #       表现为“系统起来但没有网口”。
 # 因此这里不再生成该脚本：MIO51 由 PS7 静态配置驱动为 ENET0 reset（复位释放=高）。
-# 若确认新板 MIO51 仍是 PS LED（手册 LED 表也写了 MIO51），再单独打开本段脚本，
-# 但必须在 Vivado 里把 ENET0 reset 从 MIO51 摘掉，二者不能同时占用该脚。
+# ⚠️ 本段脚本不要打开：它把 MIO51 配成 out 拉低 = 一直按住 PHY 复位 → 没有网口。
+#    新板的 PS 侧 LED 输出已改走 PL（mio-irq demo 改成 PS 按键中断 → 写 PL 的
+#    aurora 寄存器窗 → 翻 PL 的 LED），MIO51 归 PS7 独占，Linux 侧一律不碰。
 #
 # ROOTFS_POSTPROCESS_COMMAND += "ps_led_off_cfg ;"
 #

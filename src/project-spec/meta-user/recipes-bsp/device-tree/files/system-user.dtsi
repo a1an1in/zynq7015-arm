@@ -50,16 +50,32 @@
 		};
 	};
 
-	/* ===== MIO key→LED 中断 demo：新板上已停用 =====
-	 * 原节点（旧板 F6-7020）：
-	 *   mio-irq { compatible = "xlnx,mio-irq";
-	 *             led-gpios = <&gpio0 51 0>;   // PS_MIO51 -> 底板 PS 端 LED
-	 *             key-gpios = <&gpio0 50 0>; }; // PS_MIO50 -> 底板 KEY2
-	 * 新板 MLK-F6P-CZ05（XC7Z015-2CLG485I）：MIO51 是千兆网口 PHY 复位
-	 *   （Vivado PS7: PCW_ENET0_RESET_IO = MIO 51），模块 probe 时会把该脚
-	 *   拉低/翻转，等于一直按住 PHY 复位 -> 没有网口。
-	 * 因此节点、rootfs 包（CONFIG_mio-irq）、内核模块一起停用；
-	 * 需要恢复时：先在 Vivado 里把 ENET0 reset 从 MIO51 摘掉并重导 XSA，
-	 * 再把本节点按上面内容恢复（详见 git 提交 327c8d8）。
+	/* ===== MIO50 按键中断 → PL LED 翻转 demo（MLK-F6P-CZ05 / XC7Z015 版）=====
+	 *
+	 * 新板为什么不用 MIO51 当 PS 侧 LED：
+	 *   手册 "12:千兆网口" 把 MIO51 标成网口(PHY)复位，"24:LED" 表和厂商例程 DTS
+	 *   又把它当 PS LED —— 资料自相矛盾(见 fpga 仓库 docs/board-io-peripherals.md §4)。
+	 *   无论如何接线，PS7 里 ENET0 复位就挂在 MIO51(PCW_ENET0_RESET_IO = MIO 51)，
+	 *   Linux 把它当 LED 翻转 = 一直按住 PHY 复位 → "系统起来但没有网口"
+	 *   (旧板 F6-7020 的 S99psled-off 就是这么把网口弄没的)。
+	 *
+	 * 所以本 demo 改成：**PS 只负责按键中断，输出落到 PL 的 LED**，
+	 * 即 MIO50(底板 PS 按键, 下降沿) --中断--> 写 aurora 寄存器窗
+	 *      → LED_VALUE(0x10)/LED_CTRL(0x14) → 翻 PL 的 led_o[0] (U16 = 底板 LED3)
+	 *
+	 * reg 指的 0x40000000/64K 与上面的 aurora@40000000(generic-uio) 是同一块物理窗:
+	 *   UIO 供用户态(fpga 工具 mmap), 本模块在内核态 ioremap 同一窗口写 LED 寄存器。
+	 *   MIO50 未被任何 PS 外设占用(ETH0=16..27/51/52/53, USB0=28..39/46,
+	 *   SD0=40..45/47, SD1=10..15, UART1=48/49, QSPI=1..6/8)，天生就是 GPIO 且
+	 *   落在 zynq-gpio 支持中断的 MIO 组里(0..15 / 50..53)。
 	 */
+	mio-irq {
+		compatible = "xlnx,mio-irq";
+		key-gpios = <&gpio0 50 0>;   /* PS_MIO50 -> 底板 PS 按键(上拉+RC, 按下=低) */
+		reg = <0x40000000 0x10000>;   /* PL aurora 寄存器窗(PS 视角, M_AXI_GP0 基址) */
+		led-value-reg = <0x10>;       /* LED_VALUE: [3:0] 点亮哪几颗 */
+		led-ctrl-reg = <0x14>;        /* LED_CTRL : bit0 = 使能 */
+		led-mask = <0x8>;             /* 点亮 丝印 LED1 = H8 = 本工程 led_o[3] */
+		                              /* (位号与引脚顺序相反: bit0=U16,bit1=AB21,bit2=T16,bit3=H8) */
+	};
 };

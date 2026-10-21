@@ -1,6 +1,6 @@
 # PetaLinux 自定义应用(App)与打包进文件系统
 
-> 适用：PetaLinux 2021.1 / Zynq-7020（32 位）。本文以本工程 **fpga**（寄存器读写工具）为完整示例，
+> 适用：PetaLinux 2021.1 / Zynq-7015（32 位）。本文以本工程 **fpga**（寄存器读写工具）为完整示例，
 > 并附带 s2mm 相关的 app + 内核模块对照。文中路径默认工程根为 `/work/src`（即仓库的 `src/`），
 > 交互命令假设已在容器内并 `source /opt/xilinx/petalinux/settings.sh`（见《环境与编译.md》）。
 

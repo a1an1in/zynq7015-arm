@@ -1,6 +1,6 @@
 # Zynq GPIO / 中断子系统 完全解析：从设备树到 virq
 
-> 适用：Linux 5.10（PetaLinux 2021.1）@ Zynq-7020（Cortex-A9 + GIC-400）。
+> 适用：Linux 5.10（PetaLinux 2021.1）@ Zynq-7015（Cortex-A9 + GIC-400）。
 > 内核源码：`src/build/tmp/work-shared/zynq-generic/kernel-source`。
 > 本文把"GPIO 中断从设备树一路到 `request_irq` 拿到的 virq、以及运行时怎么操作寄存器"整条链钉死，
 > 重点对比 **`gpio_to_irq`（直达 domain）** 与 **`platform_get_irq`（phandle→fwnode→domain）** 两条入口。

@@ -1,8 +1,8 @@
 #
-# Zynq GPIO key(press) -> LED(toggle) interrupt demo kernel module.
+# Zynq GPIO key(press) -> PL LED(toggle) interrupt demo kernel module.
 #
-SUMMARY = "MIO key->LED interrupt demo driver"
-DESCRIPTION = "Platform module using devm_gpiod_* + gpiod_to_irq + request_irq; a key falling edge toggles an LED."
+SUMMARY = "MIO key->PL LED interrupt demo driver"
+DESCRIPTION = "Platform module using devm_gpiod_* + gpiod_to_irq + request_irq; a key falling edge toggles a PL LED through the aurora register window (MIO51 is the ENET0 PHY reset on the new board, so it must not be driven as an LED)."
 SECTION = "PETALINUX/modules"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"

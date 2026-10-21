@@ -32,7 +32,7 @@ echo
 
 echo '===== 4. 构建产物体积(大目录,可能较慢)====='
 du -sh "${HERE}/sdk/petalinux" "${HERE}/sdk/downloads" "${HERE}/sdk/sstate" \
-       "${HERE}/src/zynq7020/build/tmp" "${HERE}/src/zynq7020/build/downloads" 2>/dev/null
+       "${HERE}/src/zynq7015/build/tmp" "${HERE}/src/zynq7015/build/downloads" 2>/dev/null
 echo
 
 echo '===== 5. Docker 占用(可 prune 回收)====='

@@ -132,6 +132,16 @@ def ensure_tools():
         run(["apt-get", "install", "-y", "sshpass"], sudo=True, check=True)
 
 
+def _removable_devs():
+    rc, out = capture(["lsblk", "-dno", "NAME,SIZE,RM,TYPE,MODEL"])
+    devs = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[2] == "1" and parts[0] != "NAME":
+            devs.append("/dev/" + parts[0])
+    return devs
+
+
 def pick_dev():
     print("WSL 当前可见可移动盘(应见 ~29G 的那块):", file=sys.stderr)
     rc, out = capture(["lsblk", "-dno", "NAME,SIZE,RM,TYPE,MODEL"])
@@ -139,12 +149,28 @@ def pick_dev():
         parts = line.split()
         if parts and (parts[0] == "NAME" or (len(parts) >= 3 and parts[2] == "1")):
             print(line, file=sys.stderr)
-    print("输入要操作的 SD 卡设备(如 /dev/sdg)并回车: ", end="", file=sys.stderr, flush=True)
-    dev = sys.stdin.readline().strip()
-    if not dev or not is_block(dev):
-        print("[错误] {} 不是块设备".format(dev or "空"), file=sys.stderr)
-        return None
-    return dev
+
+    devs = _removable_devs()
+    while True:
+        print("输入要操作的 SD 卡设备(如 /dev/sdg)并回车: ", end="", file=sys.stderr, flush=True)
+        raw = sys.stdin.readline()
+        if raw == "":   # 无 stdin(EOF)
+            if len(devs) == 1:
+                print("[自动] 仅检测到一块可移动盘,选中 {}".format(devs[0]), file=sys.stderr)
+                return devs[0]
+            print("[错误] 检测到 {} 块可移动盘,但无输入,无法自动选择".format(len(devs)), file=sys.stderr)
+            return None
+        dev = raw.strip()
+        if not dev:
+            if len(devs) == 1:
+                print("[自动] 仅检测到一块可移动盘,选中 {}".format(devs[0]), file=sys.stderr)
+                return devs[0]
+            print("[提示] 输入为空,请重新输入(检测到 {} 块可移动盘)".format(len(devs)), file=sys.stderr)
+            continue
+        if not is_block(dev):
+            print("[错误] {} 不是块设备".format(dev), file=sys.stderr)
+            continue
+        return dev
 
 
 def resolve_src(s=None):

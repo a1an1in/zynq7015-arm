@@ -6,5 +6,6 @@ CONFIG_peekpoke
 CONFIG_s2mm-user
 CONFIG_xlnx-s2mm-test
 CONFIG_fpga
-# 新板 MLK-F6P-CZ05：MIO51 = ENET0 PHY 复位，不能再当 LED；模块已停用（见 configs/rootfs_config 说明）
-# CONFIG_mio-irq
+# 新板 MLK-F6P-CZ05：MIO51 = ENET0 PHY 复位，不能再当 LED 当驱动；
+# demo 改为 PS 侧 MIO50 按键中断 -> 写 PL aurora 寄存器窗 -> 翻 PL 的 LED
+CONFIG_mio-irq

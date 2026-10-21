@@ -1,4 +1,4 @@
-# petalinux-zynq7020
+# petalinux-zynq7015
 
 基于 **Docker** 的 PetaLinux **2021.1** 构建环境,面向 **Zynq-7000**(32 位 ARM Cortex-A9)。
 当前目标板为 **米联客 MLK-F6P-CZ05(XC7Z015-2CLG485I)**;原 F6-7020(XC7Z020)工程与本工程
@@ -12,7 +12,7 @@
 ## 目录结构
 
 ```
-petalinux-zynq7020/
+petalinux-zynq7015/
 ├── docker/
 │   ├── Dockerfile            # OS(Ubuntu 18.04)+PetaLinux 依赖,不含 SDK
 │   └── scripts/
