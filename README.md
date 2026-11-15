@@ -51,6 +51,18 @@ python utils/devops.py unpack-offline   # 3. 解压 downloads/sstate 离线包(�
 python utils/devops.py                  # 4. 进容器 → source settings.sh → cd src → petalinux-build
 ```
 
+Windows 原生(PowerShell + Docker Desktop)也能编,命令完全一样,只是要多设三个卷变量
+(SDK 与构建目录必须落卷:宿主是 NTFS,Yocto 拒绝在大小写不敏感的文件系统上构建):
+
+```powershell
+$env:SDK_VOLUME        = "petalinux-sdk"        # SDK(Win/WSL 共用)
+$env:BUILD_VOLUME      = "petalinux-build"      # 整个 build/
+$env:COMPONENTS_VOLUME = "petalinux-components" # src/components/yocto(避开 9p 卡死)
+python utils\devops.py petalinux-build
+```
+
+细节(怎么把 SDK 灌进卷、三个坑)见 [`doc/环境与编译.md` §7](doc/环境与编译.md)。
+
 ## 体积与换机
 
 - SDK（`sdk/` 目录）是唯一需要持久保留的东西;换机时整体拷走 + 重建镜像即可。
