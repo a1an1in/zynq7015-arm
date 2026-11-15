@@ -50,6 +50,7 @@ from pathlib import Path
 IMG_NAME_DEFAULT = "petalinux-dev:2021.1"
 SDK_VOLUME_DEFAULT = "petalinux-sdk"
 BUILD_VOLUME_DEFAULT = "petalinux-build"
+TMPDIR_VOLUME_DEFAULT = "petalinux-tmp"
 COMPONENTS_VOLUME_DEFAULT = "petalinux-components"
 INSTALLER_NAME = "petalinux-v2021.1-final-installer.run"
 DOWNLOADS_NAME = "downloads_2021.1_update1.tar.gz"
@@ -129,31 +130,59 @@ def is_linux():
 def _vol_env(name, default=None):
     """读卷名环境变量；值为 none/host/-/off 时表示"别用卷，走宿主目录"。"""
     v = env(name)
-    if v is None:
-        return default
-    if v.lower() in ("none", "host", "-", "off"):
-        return None
-    return v
+    if v is not None:
+        if v.lower() in ("none", "host", "-", "off"):
+            return None
+        return v
+    return default
+
+
+_vol_cache = {}
+_vol_noted = False
+
+
+def _auto_volume(name):
+    """Windows 原生编译：卷已建好就自动用它（免得每次都设环境变量）。
+
+    只在 Windows 下自动；Linux/WSL 保持"什么都不设 = 全用宿主目录"。
+    """
+    if name in _vol_cache:
+        return _vol_cache[name]
+    found = None
+    if is_windows():
+        try:
+            rc = subprocess.call([docker_bin(), "volume", "inspect", name],
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+            if rc == 0:
+                found = name
+        except Exception:
+            found = None
+    _vol_cache[name] = found
+    return found
 
 
 def sdk_volume():
-    """SDK 放哪个 docker 命名卷（没设=用宿主目录）。"""
-    return _vol_env("SDK_VOLUME")
+    """SDK 放哪个 docker 命名卷（Windows 下卷存在就自动用）。"""
+    return _vol_env("SDK_VOLUME", _auto_volume(SDK_VOLUME_DEFAULT))
 
 
 def build_volume():
-    """整个 build/ 放哪个 docker 命名卷。"""
+    """整个 build/ 放哪个 docker 命名卷。
+
+    注意：**不要用** —— petalinux 写配置时会跨设备 rename 失败(EXDEV)。
+    """
     return _vol_env("BUILD_VOLUME")
 
 
 def tmpdir_volume():
-    """只把 build/tmp 放哪个 docker 命名卷。"""
-    return _vol_env("TMPDIR_VOLUME")
+    """只把 build/tmp 放哪个 docker 命名卷（Windows 下卷存在就自动用）。"""
+    return _vol_env("TMPDIR_VOLUME", _auto_volume(TMPDIR_VOLUME_DEFAULT))
 
 
 def components_volume():
-    """把 src/components/yocto 放哪个 docker 命名卷（避开 Windows 9p 卡死）。"""
-    return _vol_env("COMPONENTS_VOLUME")
+    """把 src/components/yocto 放哪个 docker 命名卷（Windows 下卷存在就自动用）。"""
+    return _vol_env("COMPONENTS_VOLUME", _auto_volume(COMPONENTS_VOLUME_DEFAULT))
 
 
 def network_args():
@@ -300,6 +329,11 @@ def ensure_volume(vol):
 
 def container_run_preamble(force_tty=False):
     """构造 docker run 的公共参数（挂载 sdk、仓库根、可选离线源等）。"""
+    if is_windows() and not _vol_noted:
+        vols = [v for v in (sdk_volume(), tmpdir_volume(), components_volume()) if v]
+        if vols:
+            log(">> [info] 自动使用 docker 卷: {}".format(", ".join(vols)))
+        globals()["_vol_noted"] = True
     cmd = [docker_bin(), "run", "--rm", "-i"]
     if force_tty or want_tty():
         cmd.append("-t")
