@@ -131,7 +131,7 @@ CONFIG_fpga          # 新增一行
 在**工程根**执行（首次可用 `petalinux-config -c rootfs` 交互勾选；非交互可直接 silentconfig）：
 
 ```bash
-./utils/devops.py petalinux-config -c rootfs --silentconfig
+python utils/devops.py petalinux-config -c rootfs --silentconfig
 ```
 
 silentconfig 会做两件事：
@@ -153,7 +153,7 @@ IMAGE_INSTALL_pn-petalinux-image-minimal = "\
 ### 第 3 步：重建镜像
 
 ```bash
-./utils/devops.py petalinux-build -c petalinux-image-minimal
+python utils/devops.py petalinux-build -c petalinux-image-minimal
 ```
 
 产物在 `images/linux/`：`rootfs.tar.gz`、`rootfs.manifest` 等。
@@ -235,8 +235,8 @@ A：可以，但属于“绕过机制”：在 `meta-user` 写 `recipes-core/ima
 统一走标准注入。
 
 **Q：包重新编译不过，如何只重建这个包？**
-A：`./utils/devops.py petalinux-build -c <包名>`；若改了 recipe 想强制重编：
-`./utils/devops.py petalinux-build -x cleanall -c <包名>` 后再 build。
+A：`python utils/devops.py petalinux-build -c <包名>`；若改了 recipe 想强制重编：
+`python utils/devops.py petalinux-build -x cleanall -c <包名>` 后再 build。
 
 **Q：打包后的可执行文件在板子哪个位置？**
 A：按 `do_install` 决定；本工程示例都装到 `${bindir}`（`/usr/bin/<名>`）。

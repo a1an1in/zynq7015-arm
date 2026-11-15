@@ -23,7 +23,7 @@ petalinux-zynq7015/
 │   └── sstate/arm/           #   ← 32 位 sstate 缓存
 ├── src/              # petalinux 工程(arm,容器内 /work/src)
 └── utils/
-    ├── devops.py             # 统一入口(Linux/WSL)
+    ├── devops.py             # 统一入口(Linux/WSL/Windows)
     │                         #   build-image / install-sdk / unpack-offline / <命令...>
     ├── flash-sd.py           # SD 卡烧写(Linux/WSL 专用)
     └── wsl-disk.sh           # WSL 磁盘体检(Linux/WSL 专用)
@@ -44,11 +44,11 @@ petalinux-zynq7015/
 完整的环境搭建与编译步骤都在 [`doc/环境与编译.md`](doc/环境与编译.md),这里只给速览:
 
 ```bash
-# Linux / WSL
-./utils/devops.py build-image      # 1. 构建 Docker 镜像(一次性,只装 OS+依赖)
-./utils/devops.py install-sdk      # 2. 安装 PetaLinux SDK 到 sdk/(前置:已下载安装器与离线包)
-./utils/devops.py unpack-offline   # 3. 解压 downloads/sstate 离线包(可选但推荐,离线编译用)
-./utils/devops.py                  # 4. 进容器 → source settings.sh → cd src → petalinux-build
+# 统一用 python utils/devops.py(WSL/Linux 需先保证 python 命令可用)
+python utils/devops.py build-image      # 1. 构建 Docker 镜像(一次性,只装 OS+依赖)
+python utils/devops.py install-sdk      # 2. 安装 PetaLinux SDK 到 sdk/(前置:已下载安装器与离线包)
+python utils/devops.py unpack-offline   # 3. 解压 downloads/sstate 离线包(可选但推荐,离线编译用)
+python utils/devops.py                  # 4. 进容器 → source settings.sh → cd src → petalinux-build
 ```
 
 ## 体积与换机
@@ -73,7 +73,7 @@ petalinux-zynq7015/
   于是报 `Unable to connect to bitbake server` / `Failed to create workspace directory`）。
   `devops.py` 现在每次构建前自动清掉自己残留的构建容器，并删掉 build 目录里残留的
   `bitbake.sock` / `bitbake.lock` / `hashserve.sock`。手工排查：
-  `docker ps --filter ancestor=petalinux:2021.1`。
+  `docker ps --filter ancestor=petalinux-dev:2021.1`。
 - **空 TMPDIR 的第一次构建会报一条 `quilt-native` 签名错**：
   `ERROR: quilt-native-0.66-r0 do_rm_work: Taskhash mismatch` —— Xilinx 的 sstate 签名锁
   （`build/conf/locked-sigs.inc`）与本机重算的签名对不上，**只影响构建期工具、不影响产物**；

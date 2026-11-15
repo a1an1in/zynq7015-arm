@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""PetaLinux 2021.1 Docker 构建入口（Linux / WSL）。
+"""PetaLinux 2021.1 Docker 构建入口（Linux / WSL / Windows，统一用 python utils/devops.py，需保证 python 命令可用）。
 
 把原来分散的 shell 脚本（build-image.sh / install-sdk.sh /
 unpack-offline.sh / devops.sh）合并为一个 Python 入口，编译仍全部在 Docker 里
 执行，宿主只负责拼出 docker 触发命令（--network host + bind mount）。
 
 用法：
-    python3 utils/devops.py                        # 交互 shell，/work 为仓库根目录
-    python3 utils/devops.py petalinux-build        # 容器内 source settings.sh 后执行命令
-    python3 utils/devops.py petalinux-package --boot --u-boot --fpga --force
-    python3 utils/devops.py build-image            # 构建 docker 镜像
-    python3 utils/devops.py install-sdk [--interactive]   # 安装 SDK 到 sdk/
-    python3 utils/devops.py unpack-offline         # 解压 downloads/sstate 离线包
-    python3 utils/devops.py help
+    python utils/devops.py                        # 交互 shell，/work 为仓库根目录
+    python utils/devops.py petalinux-build        # 容器内 source settings.sh 后执行命令
+    python utils/devops.py petalinux-package --boot --u-boot --fpga --force
+    python utils/devops.py build-image            # 构建 docker 镜像
+    python utils/devops.py install-sdk [--interactive]   # 安装 SDK 到 sdk/
+    python utils/devops.py unpack-offline         # 解压 downloads/sstate 离线包
+    python utils/devops.py help
 
 SDK 放在宿主的 <仓库>/sdk 目录（bind mount 到容器 /opt/xilinx）。
 
 可配环境变量：
-    IMG_NAME            默认 petalinux:2021.1
+    IMG_NAME            默认 petalinux-dev:2021.1
     HOST_UID/HOST_GID   构建镜像时的宿主 UID/GID（默认自动探测）
     PETALINUX_INSTALLER 显式指定安装器路径
     DOWNLOADS_TGZ/SSTATEGZ  显式指定离线包压缩包路径
@@ -35,26 +35,26 @@ import sys
 import tarfile
 from pathlib import Path
 
-IMG_NAME_DEFAULT = "petalinux:2021.1"
+IMG_NAME_DEFAULT = "petalinux-dev:2021.1"
 INSTALLER_NAME = "petalinux-v2021.1-final-installer.run"
 DOWNLOADS_NAME = "downloads_2021.1_update1.tar.gz"
 SSTATE_NAME = "sstate_arm_2021.1.tar.gz"
 
 HELP = """\
-PetaLinux 2021.1 Docker 构建入口（Linux / WSL）
+PetaLinux 2021.1 Docker 构建入口（Linux / WSL / Windows，统一用 python utils/devops.py，需保证 python 命令可用）
 
 用法：
-  python3 utils/devops.py                       交互 shell（/work 为仓库根目录）
-  python3 utils/devops.py <命令...>             容器内 source settings.sh 后执行该命令
-  python3 utils/devops.py build-image           构建 Docker 镜像（只含 OS+依赖）
-  python3 utils/devops.py install-sdk           用 auto-install.sh 安装 SDK 到 sdk/
-  python3 utils/devops.py install-sdk --interactive   交互式运行真实安装器
-  python3 utils/devops.py unpack-offline        解压 downloads/sstate 离线包到 sdk/
-  python3 utils/devops.py help                  显示本帮助
+  python utils/devops.py                       交互 shell（/work 为仓库根目录）
+  python utils/devops.py <命令...>             容器内 source settings.sh 后执行该命令
+  python utils/devops.py build-image           构建 Docker 镜像（只含 OS+依赖）
+  python utils/devops.py install-sdk           用 auto-install.sh 安装 SDK 到 sdk/
+  python utils/devops.py install-sdk --interactive   交互式运行真实安装器
+  python utils/devops.py unpack-offline        解压 downloads/sstate 离线包到 sdk/
+  python utils/devops.py help                  显示本帮助
 
 示例：
-  python3 utils/devops.py petalinux-build
-  python3 utils/devops.py petalinux-package --boot --u-boot --fpga --force
+  python utils/devops.py petalinux-build
+  python utils/devops.py petalinux-package --boot --u-boot --fpga --force
 
 环境变量：IMG_NAME、HOST_UID、HOST_GID、PETALINUX_INSTALLER、DOWNLOADS_TGZ、
           SSTATEGZ、OFFLINE_SRC、PETALINUX_PROJ、DOCKER_NETWORK、SDK_DIR
