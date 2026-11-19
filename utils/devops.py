@@ -269,9 +269,12 @@ def network_args():
 def mount_volume(host, container, read_only=False):
     suffix = ":ro" if read_only else ""
     host = str(host)
-    # Windows 下统一成正斜杠：docker -v 两种写法都吃，但正斜杠不会在 bash
-    # 二次转发时被当转义符；反斜杠路径在 Windows 上更容易被解析错。
-    if is_windows():
+    # Windows 盘符路径（C:\...）转正斜杠，避免 Docker 解析出错。
+    # 但 **UNC 路径（\\wsl.localhost\...、\\server\share）必须保留反斜杠**：
+    # 实测转成正斜杠（//wsl.localhost/...）后 Docker 会**静默忽略**这个挂载，
+    # 容器里的 /work 变成镜像自带的空目录，petalinux 随后报
+    # "You are not inside a PetaLinux project"。
+    if is_windows() and not host.startswith("\\\\"):
         host = host.replace("\\", "/")
     return "{}:{}{}".format(host, container, suffix)
 
@@ -393,32 +396,8 @@ def ensure_volume(vol):
         pass
 
 
-def check_workdir_supported():
-    """Windows 上拒绝把 WSL/网络路径（\\\\wsl$、\\\\wsl.localhost、\\\\server\\share）挂进容器。
-
-    实测：Docker Desktop 对这种 UNC 源不会报错，而是挂出一个**空目录**，
-    于是 /work 里只剩两个卷挂载点，petalinux 会报
-    "You are not inside a PetaLinux project" 并打印 usage —— 极具误导性。
-    """
-    if not is_windows():
-        return
-    p = str(here())
-    if p.startswith("\\\\") or p.startswith("//"):
-        fail(
-            "当前仓库在 WSL/网络路径下，不能作为 Docker 的挂载源：\n"
-            "  {}\n"
-            "  （实测 /work 会变成空目录，petalinux 报 "
-            "\"You are not inside a PetaLinux project\"）\n"
-            "  请二选一：\n"
-            "    Windows 编译：cd C:\\...\\zynq7015-arm，然后 python utils\\devops.py <命令>\n"
-            "    Linux  编译：wsl -d Ubuntu-24.04，cd /home/.../zynq7015-arm，"
-            "然后 ./utils/devops.py <命令>"
-            .format(p))
-
-
 def container_run_preamble(force_tty=False):
     """构造 docker run 的公共参数（挂载 sdk、仓库根、可选离线源等）。"""
-    check_workdir_supported()
     if is_windows() and not _vol_noted:
         vols = [v for v in (sdk_volume(), tmpdir_volume(), components_volume()) if v]
         if vols:
