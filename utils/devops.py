@@ -490,15 +490,20 @@ def cmd_repair(args):
 
 
 def cmd_shell():
-    """无参：进入容器交互 shell。"""
+    """无参：进入容器交互 shell（自动 source SDK 并进入 /work/src）。"""
     if not sdk_ready():
         log("[warn] {} 里没看到 petalinux/settings.sh，进容器后需要手动 source。"
             .format(sdk_desc()))
     cmd = container_run_preamble()
-    boot = components_bootstrap()
-    if boot:
-        return cmd + ["bash", "-c", boot + "exec bash"]
-    return cmd
+    pre = (components_bootstrap() +
+           'source /opt/xilinx/petalinux/settings.sh /opt/xilinx/petalinux '
+           '>/dev/null 2>&1 || echo "!! source /opt/xilinx/petalinux/settings.sh 失败"; '
+           # PetaLinux 工程在 /work/src；停在 /work 会报
+           # "You are not inside a PetaLinux project"，直接进来更省事
+           'cd /work/src 2>/dev/null; '
+           'echo ">> 已 source SDK 并进入 $(pwd)（可直接 petalinux-build）"; '
+           'exec bash')
+    return cmd + ["bash", "-c", pre]
 
 
 YOCTO_CMDS = ("petalinux-build", "petalinux-config", "petalinux-package",
