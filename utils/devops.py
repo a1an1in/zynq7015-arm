@@ -393,8 +393,32 @@ def ensure_volume(vol):
         pass
 
 
+def check_workdir_supported():
+    """Windows 上拒绝把 WSL/网络路径（\\\\wsl$、\\\\wsl.localhost、\\\\server\\share）挂进容器。
+
+    实测：Docker Desktop 对这种 UNC 源不会报错，而是挂出一个**空目录**，
+    于是 /work 里只剩两个卷挂载点，petalinux 会报
+    "You are not inside a PetaLinux project" 并打印 usage —— 极具误导性。
+    """
+    if not is_windows():
+        return
+    p = str(here())
+    if p.startswith("\\\\") or p.startswith("//"):
+        fail(
+            "当前仓库在 WSL/网络路径下，不能作为 Docker 的挂载源：\n"
+            "  {}\n"
+            "  （实测 /work 会变成空目录，petalinux 报 "
+            "\"You are not inside a PetaLinux project\"）\n"
+            "  请二选一：\n"
+            "    Windows 编译：cd C:\\...\\zynq7015-arm，然后 python utils\\devops.py <命令>\n"
+            "    Linux  编译：wsl -d Ubuntu-24.04，cd /home/.../zynq7015-arm，"
+            "然后 ./utils/devops.py <命令>"
+            .format(p))
+
+
 def container_run_preamble(force_tty=False):
     """构造 docker run 的公共参数（挂载 sdk、仓库根、可选离线源等）。"""
+    check_workdir_supported()
     if is_windows() and not _vol_noted:
         vols = [v for v in (sdk_volume(), tmpdir_volume(), components_volume()) if v]
         if vols:
