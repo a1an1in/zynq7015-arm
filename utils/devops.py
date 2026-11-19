@@ -70,6 +70,7 @@ PetaLinux 2021.1 Docker 构建入口（Linux / WSL / Windows，统一用 python 
                                                 把宿主 sdk/ 灌进 docker 命名卷（Win/WSL 共用）
   python utils/devops.py build-to-volume [--from <宿主目录>] [--to <卷名>] [--tmp-from <卷名>]
                                                 把宿主 build/ 灌进 docker 命名卷
+  python utils/devops.py repair [--dry-run]    修复中断构建留下的坏状态（uninative / recipe-sysroot）
   python utils/devops.py help                  显示本帮助
 
 示例：
@@ -451,6 +452,41 @@ def container_run_preamble(force_tty=False):
 
     cmd += ["-w", "/work", "-u", "plsdk", img_name()]
     return cmd
+
+
+def cmd_repair(args):
+    """修复"编译被中途打断"留下的坏状态。
+
+    典型症状（都是实测遇到的）：
+      - ERROR: Error running gcc --version: /bin/sh: gcc: command not found
+        （build/tmp/sysroots-uninative 里只剩断链，重新解压后缓存签名又全变）
+      - FileNotFoundError / FileExistsError ...
+        recipe-sysroot-native/installeddeps/xxx(.complete)
+
+    原因：编译被 docker rm -f / 重启 Docker / 断电打断，派生目录写了一半。
+    做法：删掉 build/tmp/sysroots-uninative 和所有 recipe-sysroot*，
+          下次 petalinux-build 会从 sstate 重建（不是全量重编）。
+    """
+    dry = "--dry-run" in args
+    paths = ("find \"$W\" -depth -type d "
+             "\\( -name recipe-sysroot -o -name recipe-sysroot-native \\) "
+             "-exec rm -rf {} + 2>/dev/null || true; ")
+    script = (
+        'set -e; '
+        'U=/work/src/build/tmp/sysroots-uninative; '
+        'W=/work/src/build/tmp/work; '
+        'echo ">> uninative staging: $([ -e "$U" ] && echo 存在 || echo 不存在)"; '
+        'n=$(find "$W" -depth -type d '
+        '\\( -name recipe-sysroot -o -name recipe-sysroot-native \\) '
+        '2>/dev/null | wc -l); '
+        'echo ">> recipe-sysroot 目录: $n 个"; '
+    )
+    if dry:
+        script += 'echo ">> --dry-run：未做任何删除"; '
+    else:
+        script += ('rm -rf "$U"; ' + paths +
+                   'echo ">> 已清理，重新执行 python utils/devops.py petalinux-build 即可"')
+    return run(container_run_preamble() + ["bash", "-c", script])
 
 
 def cmd_shell():
@@ -932,6 +968,8 @@ def main(argv):
         return cmd_sdk_to_volume(args[1:])
     if first in ("build-to-volume", "build2vol"):
         return cmd_build_to_volume(args[1:])
+    if first == "repair":
+        return cmd_repair(args[1:])
     if first in ("shell", "sh"):
         return run(cmd_shell())
     if first in ("run", "exec"):
