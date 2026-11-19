@@ -75,16 +75,18 @@ PetaLinux 2021.1 Docker 构建入口（Linux / WSL / Windows，统一用 python 
 示例：
   python utils/devops.py petalinux-build
   python utils/devops.py petalinux-package --boot --u-boot --fpga --force
-  # Windows 原生（Docker Desktop）：SDK 与构建目录都要进卷
-  $env:SDK_VOLUME="petalinux-sdk"; $env:BUILD_VOLUME="petalinux-build"
-  $env:COMPONENTS_VOLUME="petalinux-components"
+  # Windows 原生（Docker Desktop）：SDK 与 TMPDIR 要进卷；
+  # components 默认用 tmpfs（卷不存在时），也可以显式指定
+  $env:SDK_VOLUME="petalinux-sdk"; $env:TMPDIR_VOLUME="petalinux-tmp"
+  $env:COMPONENTS_VOLUME="tmpfs"
   python utils/devops.py petalinux-build
 
 环境变量：IMG_NAME、HOST_UID、HOST_GID、PETALINUX_INSTALLER、DOWNLOADS_TGZ、
           SSTATEGZ、OFFLINE_SRC、PETALINUX_PROJ、DOCKER_NETWORK、SDK_DIR、
-          SDK_VOLUME（SDK 放命名卷）、BUILD_VOLUME（整个 build/ 放卷，优先）、
-          TMPDIR_VOLUME（只放 build/tmp）、COMPONENTS_VOLUME（放 src/components/yocto）
-          任一卷名设 none/host 即退回宿主目录。
+          SDK_VOLUME（SDK 放命名卷）、BUILD_VOLUME（整个 build/ 放卷，**不要用**）、
+          TMPDIR_VOLUME（只放 build/tmp）、COMPONENTS_VOLUME（放 src/components/yocto；
+          设为 tmpfs 用内存盘，Windows 上卷不存在时默认就是 tmpfs）
+          卷名设 none/host 即退回宿主目录。
 """
 
 
@@ -180,9 +182,72 @@ def tmpdir_volume():
     return _vol_env("TMPDIR_VOLUME", _auto_volume(TMPDIR_VOLUME_DEFAULT))
 
 
+def components_tmpfs():
+    """components 用 tmpfs（内存盘）代替卷/宿主目录。
+
+    为什么需要它（两个原因）：
+      1) petalinux 展开 Yocto SDK 时，安装器内部的 tar 会 chmod 目标根目录。Windows 侧
+         创建的目录在 9p 里是 root 属主，容器用户(uid 1000)不是 owner，于是报
+
+             tar: .: Cannot change mode to rwxr-xr-x: Operation not permitted
+             ERROR: Failed to Extract Yocto SDK.
+
+         （注：9p 本身是支持 chmod 的——挂载带 metadata；失败原因是属主。）
+      2) 即使展开成功，bitbake 解析 components/yocto 下 1.3 万个层文件时每个都要走 9p，
+         实测会长时间卡在 "Parsing recipes..."（10 月那次也是）。
+
+    tmpfs 两个问题都没有，而且整个展开只要约 1 秒（99 M / 13k 文件）。
+
+    取值：
+      COMPONENTS_VOLUME=tmpfs   显式用 tmpfs
+      COMPONENTS_VOLUME=<卷名>   用命名卷
+      COMPONENTS_VOLUME=none    退回宿主目录（NTFS，展开会失败，只用于排查）
+      不设：Windows 上若默认卷存在就用卷，不存在则自动用 tmpfs；
+            Linux/WSL 保持宿主目录（ext4 本来就支持 chmod）
+    """
+    v = env("COMPONENTS_VOLUME")
+    if v is not None:
+        return v.strip().lower() == "tmpfs"
+    if not is_windows():
+        return False
+    return _auto_volume(COMPONENTS_VOLUME_DEFAULT) is None
+
+
 def components_volume():
     """把 src/components/yocto 放哪个 docker 命名卷（Windows 下卷存在就自动用）。"""
+    if components_tmpfs():
+        return None
     return _vol_env("COMPONENTS_VOLUME", _auto_volume(COMPONENTS_VOLUME_DEFAULT))
+
+
+COMPONENTS_MARKER = "environment-setup-cortexa9t2hf-neon-xilinx-linux-gnueabi"
+
+
+def components_bootstrap():
+    """tmpfs 模式下，每次容器启动时把 Yocto SDK 展开进去（约 1 秒）。
+
+    tmpfs 是易失的，但展开很快；比让 bitbake 去读 9p 上的 1.3 万个文件划算得多。
+    """
+    if not components_tmpfs():
+        return ""
+    return (
+        'if [ ! -f "/work/src/components/yocto/{marker}" ]; then '
+        '  echo ">> [info] components 用 tmpfs，展开 Yocto SDK ..."; '
+        '  src=/opt/xilinx/petalinux/components/yocto/source/arm; '
+        '  [ -f "$src" ] || src=/opt/xilinx/petalinux/components/yocto/source/aarch64; '
+        # 必须用 -y：安装器脚本里 answer="" 会清掉环境变量，只有 -y 才会自动应答；
+        # 再补 </dev/null，即使临时开了 TTY 也不会卡在 "Proceed [Y/n]?" 上。
+        '  if ! "$src" -y -d /work/src/components/yocto '
+        '       </dev/null >/tmp/components-install.log 2>&1; then '
+        '    tail -20 /tmp/components-install.log; '
+        '    echo "!! components 展开失败（详见 /tmp/components-install.log）"; exit 1; '
+        '  fi; '
+        # 安装器会在根目录留 .devtoolbase；它的存在会让 devtool 认为这是 fixed setup，
+        # 从而不注册 create-workspace，petalinux 随后就报 "Failed to create workspace
+        # directory"。卷里那份没有这个文件，所以这里删掉保持一致。
+        '  rm -f /work/src/components/yocto/.devtoolbase; '
+        'fi; '
+    ).format(marker=COMPONENTS_MARKER)
 
 
 def network_args():
@@ -333,6 +398,8 @@ def container_run_preamble(force_tty=False):
         vols = [v for v in (sdk_volume(), tmpdir_volume(), components_volume()) if v]
         if vols:
             log(">> [info] 自动使用 docker 卷: {}".format(", ".join(vols)))
+        if components_tmpfs():
+            log(">> [info] components 使用 tmpfs（每次启动展开 Yocto SDK，约 1 秒）")
         globals()["_vol_noted"] = True
     cmd = [docker_bin(), "run", "--rm", "-i"]
     if force_tty or want_tty():
@@ -369,10 +436,18 @@ def container_run_preamble(force_tty=False):
     # Yocto 层文件(src/components/yocto/layers, 1.3 万个文件)在 Windows 上要走
     # 9p 读，实测会把 bitbake 卡死在 p9_client_rpc（读字节数停在同一值不涨）。
     # 放进卷里就全在 VM 内 ext4 上读，既快又不会卡。
-    cvol = components_volume()
-    if cvol:
-        ensure_volume(cvol)
-        cmd += ["-v", "{}:/work/src/components/yocto".format(cvol)]
+    #
+    # tmpfs 模式：petalinux 展开 SDK 时安装器的 tar 要 chmod 目标根目录，9p 不支持
+    # chmod（会报 "Cannot change mode ... Operation not permitted"），tmpfs 支持；
+    # 展开只要约 1 秒，由 components_bootstrap() 在容器启动时做。
+    if components_tmpfs():
+        cmd += ["--tmpfs",
+                "/work/src/components/yocto:rw,size=4g,exec,uid=1000,gid=1000,mode=755"]
+    else:
+        cvol = components_volume()
+        if cvol:
+            ensure_volume(cvol)
+            cmd += ["-v", "{}:/work/src/components/yocto".format(cvol)]
 
     cmd += ["-w", "/work", "-u", "plsdk", img_name()]
     return cmd
@@ -383,7 +458,11 @@ def cmd_shell():
     if not sdk_ready():
         log("[warn] {} 里没看到 petalinux/settings.sh，进容器后需要手动 source。"
             .format(sdk_desc()))
-    return container_run_preamble()
+    cmd = container_run_preamble()
+    boot = components_bootstrap()
+    if boot:
+        return cmd + ["bash", "-c", boot + "exec bash"]
+    return cmd
 
 
 YOCTO_CMDS = ("petalinux-build", "petalinux-config", "petalinux-package",
@@ -485,7 +564,8 @@ def cmd_run(args):
         check_build_volume(args)
         cleanup_stale_containers()
     proj = env("PETALINUX_PROJ") or "/work/src"
-    bash_c = ('source /opt/xilinx/petalinux/settings.sh /opt/xilinx/petalinux '
+    bash_c = (components_bootstrap() +
+              'source /opt/xilinx/petalinux/settings.sh /opt/xilinx/petalinux '
               '&& cd "$1" && shift && '
               # 上次异常退出留下的锁/socket 会让 bitbake 连不上 server，先清掉
               'rm -f "{p}/build/bitbake.sock" "{p}/build/bitbake.lock" '

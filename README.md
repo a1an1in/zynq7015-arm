@@ -51,22 +51,22 @@ python utils/devops.py unpack-offline   # 3. 解压 downloads/sstate 离线包(�
 python utils/devops.py                  # 4. 进容器 → source settings.sh → cd src → petalinux-build
 ```
 
-Windows 原生(PowerShell + Docker Desktop)也能编，命令完全一样，**不用设任何环境变量** ——
-`devops.py` 会自动认出下面三个 docker 卷（卷不存在时才需要手动指定）：
+Windows 原生(PowerShell + Docker Desktop)也能编，命令完全一样，**不用设任何环境变量**：
 
-| 卷 | 内容 | 为什么必须在卷里 |
+| 内容 | 放哪 | 为什么 |
 |---|---|---|
-| `petalinux-sdk` | SDK（~63 G，Win/WSL 共用）| Windows 原生 docker 够不到 WSL 的 ext4 路径 |
-| `petalinux-tmp` | `build/tmp` | 宿主是 NTFS（大小写不敏感），Yocto 会拒绝构建 |
-| `petalinux-components` | `src/components/yocto` | Windows 的 9p 文件共享会让 bitbake 解析层文件卡死 |
+| SDK（~63 G，Win/WSL 共用）| docker 卷 `petalinux-sdk` | Windows 原生 docker 够不到 WSL 的 ext4 路径 |
+| `build/tmp` | docker 卷 `petalinux-tmp` | 宿主是 NTFS（大小写不敏感），Yocto 会拒绝构建 |
+| `src/components/yocto`（Yocto 层文件）| **tmpfs**（默认），或卷 `petalinux-components` | NTFS 上安装器会因属主问题 chmod 失败；展开后 bitbake 解析 1.3 万文件走 9p 也会卡住。tmpfs 两个问题都没有，展开只要约 1 秒 |
 
 ```powershell
 python utils\devops.py petalinux-build
 ```
 
-要换别的卷名时才手动设 `SDK_VOLUME` / `TMPDIR_VOLUME` / `COMPONENTS_VOLUME`
-（设成 `none` 则退回宿主目录）。细节（怎么把 SDK 灌进卷、五个坑）见
-[`doc/环境与编译.md` §7](doc/环境与编译.md)。
+`devops.py` 的判断顺序：显式设了 `COMPONENTS_VOLUME` 就听它的（`tmpfs` / 卷名 / `none`）；
+否则 Windows 上**卷存在就用卷，不存在就用 tmpfs**。所以 `petalinux-components` 卷是可选的，
+删掉它（`docker volume rm petalinux-components`）也不会影响编译。细节（怎么把 SDK 灌进卷、
+六个坑）见 [`doc/环境与编译.md` §7](doc/环境与编译.md)。
 
 ## 体积与换机
 
